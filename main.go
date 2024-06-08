@@ -20,8 +20,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error loading %s .env file", wd)
 	}
+	token := os.Getenv("TMDB_BEARER_TOKEN")
 
-	tmdbClient, err := tmdb.InitV4(os.Getenv("TMDB_BEARER_TOKEN"))
+	if token == "" {
+		panic("TMDB_BEARER_TOKEN environment variable not set")
+	}
+
+	tmdbClient, err := tmdb.InitV4(token)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -61,12 +66,7 @@ func main() {
 			return nil
 		})
 
-	_ = existingEpisodes
-	_ = tvShow
-
 	for _, season := range tvShow.Seasons {
-		//	fmt.Println(season.Name)
-		//	fmt.Println(season.EpisodeCount)
 
 		re := regexp.MustCompile("[0-9]+")
 		seasonNumber := re.FindAllString(season.Name, -1)
@@ -87,9 +87,9 @@ func main() {
 
 			needle := fmt.Sprintf("S%sE%s", seasonNumber[0], episodeNumber)
 
-			blub := containsSubstring(existingEpisodes, needle)
-			_ = blub
-			if !blub {
+			exists := containsSubstring(existingEpisodes, needle)
+
+			if !exists {
 				fmt.Println("Missing Episode " + needle)
 			}
 		}
