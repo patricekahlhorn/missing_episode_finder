@@ -2,110 +2,76 @@ package main
 
 import (
 	"fmt"
-	tmdb "github.com/cyruzin/golang-tmdb"
-	"github.com/joho/godotenv"
-	"log"
+	"github.com/patricekahlhorn/missing_episode_finder/internal/files"
+	"github.com/patricekahlhorn/missing_episode_finder/internal/strings"
+	"github.com/patricekahlhorn/missing_episode_finder/internal/tmdb"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
-	"strings"
+	"sync"
 )
 
 func main() {
-	wd, _ := os.Getwd()
+	showName := ShowName()
 
-	err := godotenv.Load("/home/server/projects/missing_episode/.env")
-	if err != nil {
-		log.Fatalf("Error loading %s .env file", wd)
-	}
-	token := os.Getenv("TMDB_BEARER_TOKEN")
+	existingEpisodes := files.ExistingEpisodes()
 
-	if token == "" {
-		panic("TMDB_BEARER_TOKEN environment variable not set")
-	}
+	seasons := tmdb.GetSeasons(showName)
 
-	tmdbClient, err := tmdb.InitV4(token)
-	if err != nil {
-		fmt.Println(err)
-	}
-	if err != nil {
-		fmt.Println(err)
+	wg := sync.WaitGroup{}
+	wg.Add(len(seasons))
+
+	for _, season := range seasons {
+		go checkMissingEpisode(season, existingEpisodes, &wg)
+
 	}
 
-	basePath := filepath.Base(wd)
-
-	search, err := tmdbClient.GetSearchTVShow(basePath, nil)
-
-	if len(search.SearchTVShowsResults.Results) == 0 {
-		panic("No TV shows found")
-	}
-
-	firstResult := search.SearchTVShowsResults.Results[0]
-
-	tvShow, err := tmdbClient.GetTVDetails(int(firstResult.ID), nil)
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	existingEpisodes := make([]string, 0)
-
-	err = filepath.Walk(wd,
-		func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-
-			existingEpisodes = append(existingEpisodes, info.Name())
-
-			return nil
-		})
-
-	for _, season := range tvShow.Seasons {
-
-		re := regexp.MustCompile("[0-9]+")
-		seasonNumber := re.FindAllString(season.Name, -1)
-
-		if seasonNumber == nil || len(seasonNumber) == 0 {
-			continue
-		}
-		if len(seasonNumber[0]) <= 1 {
-			seasonNumber[0] = "0" + seasonNumber[0]
-		}
-
-		for i := 1; i < season.EpisodeCount; i++ {
-
-			episodeNumber := strconv.Itoa(i)
-			if len(episodeNumber) <= 1 {
-				episodeNumber = "0" + episodeNumber
-			}
-
-			needle := fmt.Sprintf("S%sE%s", seasonNumber[0], episodeNumber)
-
-			exists := containsSubstring(existingEpisodes, needle)
-
-			if !exists {
-				fmt.Println("Missing Episode " + needle)
-			}
-		}
-	}
-
+	wg.Wait()
 }
 
-func containsSubstring(arr []string, substring string) bool {
-	// Sort the array
-	sort.Strings(arr)
+type Episode struct {
+	id     int
+	season int
+}
 
-	for _, v := range arr {
-		if strings.Contains(strings.ToLower(v), strings.ToLower(substring)) {
-			return true
-		}
+func (e Episode) number() string {
+
+	number := strconv.Itoa(e.id)
+	if len(number) <= 1 {
+		number = "0" + number
 	}
 
-	return false
+	return number
+}
+
+func checkMissingEpisode(s tmdb.Season, existingEpisodes []string, wg *sync.WaitGroup) {
+	seasonNumber := s.Number()
+
+	defer wg.Done()
+
+	if seasonNumber == "" {
+		return
+	}
+
+	for i := 1; i < s.EpisodeCount; i++ {
+		episode := Episode{id: i}
+
+		needle := strings.EpisodeString(seasonNumber, episode.number())
+
+		exists := strings.ContainsSubstring(existingEpisodes, needle)
+
+		if !exists {
+			fmt.Println("Missing Episode " + needle)
+		}
+	}
+}
+
+func ShowName() string {
+	wd, err := os.Getwd()
+
+	if err != nil {
+		panic("Error getting current working directory")
+	}
+
+	return filepath.Base(wd)
 }
